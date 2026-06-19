@@ -35,7 +35,7 @@ function saveDb() {
 app.post('/api/register', (req, res) => {
     const { name } = req.body;
     if (!usersData[name]) {
-        usersData[name] = { spins: 3 }; // Даем 3 попытки при первой регистрации
+        usersData[name] = { spins: 1}; // Даем 1 попытки при первой регистрации
         saveDb();
     }
     res.json({ success: true, user: usersData[name] });
