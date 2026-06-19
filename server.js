@@ -11,7 +11,7 @@ app.use(express.json()); // Чтобы сервер понимал данные,
 
 // Твои настройки
 let appConfig = {
-    meetingDate: "25 июня 2026",
+    meetingDate: "2026-06-25",
     meetingTime: "17:00 – 19:30"
 };
 
