@@ -52,15 +52,19 @@ app.get('/api/users', (req, res) => {
     res.json(usersData);
 });
 
-// 4. Админ: Начисление попыток
-app.post('/api/add-spins', (req, res) => {
-    const { name, amount, key } = req.body;
-    if (key !== ADMIN_KEY) return res.status(403).send("Ошибка: Неверный ключ");
+// 5. Списание попытки после прокрута
+app.post('/api/spend-spin', (req, res) => {
+    const { name } = req.body;
     
+    // Проверяем, существует ли пользователь в базе
     if (usersData[name]) {
-        usersData[name].spins += amount;
-        saveDb();
-        res.json({ success: true, newTotal: usersData[name].spins });
+        if (usersData[name].spins > 0) {
+            usersData[name].spins -= 1; // Уменьшаем на 1
+            saveDb(); // Сохраняем базу
+            res.json({ success: true, newTotal: usersData[name].spins });
+        } else {
+            res.status(400).send("Нет доступных попыток");
+        }
     } else {
         res.status(404).send("Пользователь не найден");
     }
