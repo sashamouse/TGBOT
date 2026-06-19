@@ -163,3 +163,14 @@ bot.onText(/\/test/, (msg) => {
     const chatId = msg.chat.id;
     bot.sendMessage(chatId, "✅ Тестовое уведомление работает! Если ты это видишь, значит всё настроено правильно.");
 });
+
+app.post('/api/complete-task', (req, res) => {
+    const { name } = req.body;
+    if (usersData[name]) {
+        usersData[name].spins += 1;
+        saveDb();
+        res.json({ success: true, newTotal: usersData[name].spins });
+    } else {
+        res.status(404).send("Пользователь не найден");
+    }
+});
