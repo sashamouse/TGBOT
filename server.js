@@ -36,44 +36,35 @@ function saveDb() {
 
 // --- API ДЛЯ РУЛЕТКИ ---
 
-// 1. Регистрация пользователя
 app.post('/api/register', (req, res) => {
     const { name } = req.body;
     if (!usersData[name]) {
-        usersData[name] = { spins: 1 }; // Даем 1 попытку при первой регистрации
+        usersData[name] = { spins: 1 };
         saveDb();
     }
     res.json({ success: true, user: usersData[name] });
 });
 
-// 2. Получение данных пользователя
 app.get('/api/spins/:name', (req, res) => {
     const name = req.params.name;
     res.json(usersData[name] || { spins: 0 });
 });
 
-// 3. Админ: Список всех пользователей
 app.get('/api/users', (req, res) => {
     res.json(usersData);
 });
 
-// 4. Админ: Начисление попыток через консоль (ТЫ ЭТО СЛУЧАЙНО УДАЛИЛ)
 app.post('/api/add-spins', (req, res) => {
     const { name, amount, key } = req.body;
     if (key !== ADMIN_KEY) return res.status(403).send("Ошибка: Неверный ключ");
-    
-    // Если пользователя нет, создаем его
     if (!usersData[name]) usersData[name] = { spins: 0 };
-    
     usersData[name].spins += parseInt(amount);
     saveDb();
     res.json({ success: true, newTotal: usersData[name].spins });
 });
 
-// 5. Списание попытки после прокрута
 app.post('/api/spend-spin', (req, res) => {
     const { name } = req.body;
-    
     if (usersData[name] && usersData[name].spins > 0) {
         usersData[name].spins -= 1; 
         saveDb(); 
@@ -83,39 +74,31 @@ app.post('/api/spend-spin', (req, res) => {
     }
 });
 
-// 6. Начисление попытки за выполнение задания (С ЗАЩИТОЙ)
 app.post('/api/complete-task', (req, res) => {
     const { name } = req.body;
-    
     if (!name) return res.status(400).send("Нет имени");
-
-    // Если сервер перезагрузился и забыл пользователя, мы его тут же создаем
-    if (!usersData[name]) {
-        usersData[name] = { spins: 0 };
-    }
-    
+    if (!usersData[name]) usersData[name] = { spins: 0 };
     usersData[name].spins += 1;
     saveDb();
     res.json({ success: true, newTotal: usersData[name].spins });
 });
 
-// --- СТАРЫЙ ФУНКЦИОНАЛ ---
+// --- УПРАВЛЕНИЕ КОНФИГУРАЦИЕЙ ВСТРЕЧИ ---
 
 app.get('/config', (req, res) => {
     res.json(appConfig);
 });
 
+// Обновленный эндпоинт с раздельными уведомлениями
 app.post('/update-config', (req, res) => {
     const { key, date, time } = req.body;
     if (key !== ADMIN_KEY) return res.status(403).send("Ошибка: Неверный ключ");
     
-    // Если она меняет дату — прилетит только это уведомление
     if (date && date !== appConfig.meetingDate) {
         appConfig.meetingDate = date;
         bot.sendMessage(myChatId, `📅 Внимание! Она изменила ДАТУ встречи на: ${date}`);
     }
 
-    // Если она меняет время — прилетит только это уведомление
     if (time && time !== appConfig.meetingTime) {
         appConfig.meetingTime = time;
         bot.sendMessage(myChatId, `⏰ Внимание! Она изменила ВРЕМЯ встречи на: ${time}`);
@@ -132,20 +115,38 @@ app.use((req, res, next) => {
     next();
 });
 
+// --- НАСТРОЙКИ ТЕЛЕГРАМ БОТА ---
 const token = '8826215313:AAFs8n9UuyTEjoe3JIZe3J_KrO92jqa3BjE';
 const myChatId = '743098995'; 
 const bot = new TelegramBot(token, { polling: true });
 
-function saveUserChatId(chatId) {
+// Умная функция сохранения: записывает ID, Никнейм и Имя
+function saveUserChatId(chatId, username, firstName) {
     const filePath = 'users.json';
     let users = [];
     if (fs.existsSync(filePath)) {
         try { users = JSON.parse(fs.readFileSync(filePath)); } catch (e) { users = []; }
     }
-    if (!users.includes(chatId)) {
-        users.push(chatId);
-        fs.writeFileSync(filePath, JSON.stringify(users));
-        console.log(`Пользователь ${chatId} сохранен.`);
+    
+    // Пересобираем базу, если в ней были старые ID без объектов
+    users = users.map(u => typeof u === 'object' ? u : { id: u, username: 'нет ника', firstName: 'Пользователь' });
+
+    const existingUser = users.find(u => u.id.toString() === chatId.toString());
+    if (!existingUser) {
+        users.push({
+            id: chatId,
+            username: username || 'нет ника',
+            firstName: firstName || 'Без имени'
+        });
+        fs.writeFileSync(filePath, JSON.stringify(users, null, 2));
+        console.log(`Пользователь ${chatId} (${username}) сохранен.`);
+    } else {
+        // Если ник или имя обновились в телеграме — перезаписываем актуальные данные
+        if (username && existingUser.username !== username) {
+            existingUser.username = username;
+            existingUser.firstName = firstName || existingUser.firstName;
+            fs.writeFileSync(filePath, JSON.stringify(users, null, 2));
+        }
     }
 }
 
@@ -163,17 +164,96 @@ app.post('/set-reminder', (req, res) => {
     schedule.scheduleJob(notificationTime, () => {
         if (fs.existsSync('users.json')) {
             const users = JSON.parse(fs.readFileSync('users.json'));
-            users.forEach(id => { bot.sendMessage(id, `🔔 Напоминание! Встреча через 8 часов: ${meetingDate}`); });
+            users.forEach(u => { 
+                const targetId = typeof u === 'object' ? u.id : u;
+                bot.sendMessage(targetId, `🔔 Напоминание! Встреча через 8 часов: ${meetingDate}`); 
+            });
         }
     });
     console.log(`Уведомление запланировано на: ${notificationTime}`);
     res.status(200).send({ status: 'success', time: notificationTime });
 });
 
+// --- ОБРАБОТКА КОМАНД БОТА ---
+
+// Когда она нажимает кнопку на сайте и запускает бота
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    saveUserChatId(chatId);
+    const username = msg.from.username ? `@${msg.from.username}` : 'нет ника';
+    const firstName = msg.from.first_name || 'Без имени';
+
+    // Сохраняем в базу с ником и именем
+    saveUserChatId(chatId, username, firstName);
+    
+    // Ответ ей в чат
     bot.sendMessage(chatId, "Принято! Теперь ты будешь получать уведомления.");
+
+    // МГНОВЕННОЕ УВЕДОМЛЕНИЕ ТЕБЕ ОБ ЭТОМ!
+    const adminNotice = `🔔 Она (или другой пользователь) подписалась на уведомления о встрече!\n\n👤 Имя: ${firstName}\nНик: ${username}\nID: \`${chatId}\``;
+    bot.sendMessage(myChatId, adminNotice, { parse_mode: 'Markdown' });
+});
+
+// Админ-команда: Список всех пользователей с именами и никами
+bot.onText(/\/chats/, (msg) => {
+    const chatId = msg.chat.id.toString();
+    if (chatId !== myChatId) return;
+
+    if (fs.existsSync('users.json')) {
+        let users = JSON.parse(fs.readFileSync('users.json'));
+        if (users.length === 0) {
+            return bot.sendMessage(myChatId, "👥 Список пользователей пуст.");
+        }
+        
+        let responseMessage = "👥 **Список пользователей в базе:**\n\n";
+        users.forEach((u, index) => {
+            if (typeof u === 'object') {
+                responseMessage += `${index + 1}. ✨ **${u.firstName}** | Ник: ${u.username} | ID: \`${u.id}\`\n`;
+            } else {
+                responseMessage += `${index + 1}. ID: \`${u}\` (старый формат, без имени)\n`;
+            }
+        });
+        responseMessage += "\nЧтобы отправить сообщение конкретному человеку, скопируй его ID и напиши:\n`/send [ID] [Текст]`";
+        bot.sendMessage(myChatId, responseMessage, { parse_mode: 'Markdown' });
+    } else {
+        bot.sendMessage(myChatId, "Файл users.json еще не создан.");
+    }
+});
+
+// Админ-команда: Отправить личное сообщение по ID
+bot.onText(/\/send (\d+) (.+)/, (msg, match) => {
+    const chatId = msg.chat.id.toString();
+    if (chatId !== myChatId) return;
+
+    const targetChatId = match[1];
+    const textToSend = match[2];
+
+    bot.sendMessage(targetChatId, textToSend)
+        .then(() => {
+            bot.sendMessage(myChatId, `✅ Сообщение успешно отправлено на ID ${targetChatId}`);
+        })
+        .catch((err) => {
+            bot.sendMessage(myChatId, `❌ Ошибка отправки: ${err.message}`);
+        });
+});
+
+// Админ-команда: Рассылка сразу всем
+bot.onText(/\/broadcast (.+)/, (msg, match) => {
+    const chatId = msg.chat.id.toString();
+    if (chatId !== myChatId) return;
+
+    const textToSend = match[1];
+
+    if (fs.existsSync('users.json')) {
+        const users = JSON.parse(fs.readFileSync('users.json'));
+        users.forEach(u => {
+            const targetId = typeof u === 'object' ? u.id : u;
+            bot.sendMessage(targetId, textToSend)
+                .catch((err) => console.log(`Ошибка рассылки для ${targetId}:`, err.message));
+        });
+        bot.sendMessage(myChatId, `📢 Рассылка успешно отправлена всем!`);
+    } else {
+        bot.sendMessage(myChatId, "База пуста, слать некому.");
+    }
 });
 
 cron.schedule('0 9 25 6 *', () => {
@@ -187,58 +267,3 @@ bot.onText(/\/test/, (msg) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
-
-// --- АДМИН-КОМАНДЫ ДЛЯ УПРАВЛЕНИЯ ИЗ ТЕЛЕГРАМА ---
-
-// 1. Посмотреть список всех, кто подписался (нажал на кнопку)
-bot.onText(/\/chats/, (msg) => {
-    const chatId = msg.chat.id.toString();
-    if (chatId !== myChatId) return; // Проверка, что пишет именно админ (ты)
-
-    if (fs.existsSync('users.json')) {
-        const users = JSON.parse(fs.readFileSync('users.json'));
-        if (users.length === 0) {
-            bot.sendMessage(myChatId, "👥 Список пользователей пуст.");
-        } else {
-            bot.sendMessage(myChatId, `👥 Список ID пользователей в базе:\n\n${users.join('\n')}\n\nЧтобы отправить сообщение конкретному человеку, скопируй его ID и напиши:\n/send [ID] [Текст]`);
-        }
-    } else {
-        bot.sendMessage(myChatId, "Файл users.json еще не создан (никто не подписался).");
-    }
-});
-
-// 2. Отправить любое сообщение ЛЮБОМУ пользователю по его ID
-bot.onText(/\/send (\d+) (.+)/, (msg, match) => {
-    const chatId = msg.chat.id.toString();
-    if (chatId !== myChatId) return; // Только для тебя
-
-    const targetChatId = match[1]; // ID того, кому шлем
-    const textToSend = match[2];   // Текст сообщения
-
-    bot.sendMessage(targetChatId, textToSend)
-        .then(() => {
-            bot.sendMessage(myChatId, `✅ Сообщение успешно отправлено на ID ${targetChatId}`);
-        })
-        .catch((err) => {
-            bot.sendMessage(myChatId, `❌ Ошибка отправки: ${err.message}`);
-        });
-});
-
-// 3. Отправить сообщение СРАЗУ ВСЕМ (если там будешь ты, она и кто-то еще)
-bot.onText(/\/broadcast (.+)/, (msg, match) => {
-    const chatId = msg.chat.id.toString();
-    if (chatId !== myChatId) return; // Только для тебя
-
-    const textToSend = match[1];
-
-    if (fs.existsSync('users.json')) {
-        const users = JSON.parse(fs.readFileSync('users.json'));
-        users.forEach(id => {
-            bot.sendMessage(id, textToSend)
-                .catch((err) => console.log(`Ошибка отправки для ${id}:`, err.message));
-        });
-        bot.sendMessage(myChatId, `📢 Рассылка улетела всем пользователям!`);
-    } else {
-        bot.sendMessage(myChatId, "База пуста, слать некому.");
-    }
-});
