@@ -174,3 +174,28 @@ app.post('/api/complete-task', (req, res) => {
         res.status(404).send("Пользователь не найден");
     }
 });
+
+// Эндпоинт для обновления даты/времени и отправки уведомления
+app.post('/api/update-meeting', (req, res) => {
+    const { newDate, newTime } = req.body;
+    
+    // Формируем сообщение, если что-то изменилось
+    let changes = [];
+    if (newDate && newDate !== appConfig.meetingDate) {
+        changes.push(`📅 Дата: была "${appConfig.meetingDate}", стала "${newDate}"`);
+        appConfig.meetingDate = newDate;
+    }
+    if (newTime && newTime !== appConfig.meetingTime) {
+        changes.push(`⏰ Время: было "${appConfig.meetingTime}", стало "${newTime}"`);
+        appConfig.meetingTime = newTime;
+    }
+
+    // Если изменения были, шлем уведомление в телеграм
+    if (changes.length > 0) {
+        const message = `🔔 Внимание, изменения встречи!\n\n${changes.join('\n')}`;
+        bot.sendMessage(myChatId, message); // myChatId должен быть определен у тебя в коде
+        res.status(200).send({ status: 'success', message: 'Уведомление отправлено' });
+    } else {
+        res.status(200).send({ status: 'no_changes', message: 'Данные не изменились' });
+    }
+});
