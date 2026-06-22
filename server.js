@@ -18,12 +18,16 @@ let appConfig = {
 const ADMIN_KEY = "mysecret123";
 
 // --- ХРАНИЛИЩЕ ПОЛЬЗОВАТЕЛЕЙ (для попыток рулетки) ---
-let usersData = {}; // Объект для хранения: { "Имя": { spins: 3 } }
+let usersData = {}; 
 const DB_FILE = 'users_db.json';
 
 // Загрузка данных при старте
 if (fs.existsSync(DB_FILE)) {
-    usersData = JSON.parse(fs.readFileSync(DB_FILE));
+    try {
+        usersData = JSON.parse(fs.readFileSync(DB_FILE));
+    } catch (e) {
+        usersData = {};
+    }
 }
 
 function saveDb() {
@@ -31,11 +35,12 @@ function saveDb() {
 }
 
 // --- API ДЛЯ РУЛЕТКИ ---
+
 // 1. Регистрация пользователя
 app.post('/api/register', (req, res) => {
     const { name } = req.body;
     if (!usersData[name]) {
-        usersData[name] = { spins: 1}; // Даем 1 попытки при первой регистрации
+        usersData[name] = { spins: 1 }; // Даем 1 попытку при первой регистрации
         saveDb();
     }
     res.json({ success: true, user: usersData[name] });
@@ -52,46 +57,73 @@ app.get('/api/users', (req, res) => {
     res.json(usersData);
 });
 
+// 4. Админ: Начисление попыток через консоль (ТЫ ЭТО СЛУЧАЙНО УДАЛИЛ)
+app.post('/api/add-spins', (req, res) => {
+    const { name, amount, key } = req.body;
+    if (key !== ADMIN_KEY) return res.status(403).send("Ошибка: Неверный ключ");
+    
+    // Если пользователя нет, создаем его
+    if (!usersData[name]) usersData[name] = { spins: 0 };
+    
+    usersData[name].spins += parseInt(amount);
+    saveDb();
+    res.json({ success: true, newTotal: usersData[name].spins });
+});
+
 // 5. Списание попытки после прокрута
 app.post('/api/spend-spin', (req, res) => {
     const { name } = req.body;
     
-    // Проверяем, существует ли пользователь в базе
-    if (usersData[name]) {
-        if (usersData[name].spins > 0) {
-            usersData[name].spins -= 1; // Уменьшаем на 1
-            saveDb(); // Сохраняем базу
-            res.json({ success: true, newTotal: usersData[name].spins });
-        } else {
-            res.status(400).send("Нет доступных попыток");
-        }
+    if (usersData[name] && usersData[name].spins > 0) {
+        usersData[name].spins -= 1; 
+        saveDb(); 
+        res.json({ success: true, newTotal: usersData[name].spins });
     } else {
-        res.status(404).send("Пользователь не найден");
+        res.status(400).send("Нет доступных попыток");
     }
+});
+
+// 6. Начисление попытки за выполнение задания (С ЗАЩИТОЙ)
+app.post('/api/complete-task', (req, res) => {
+    const { name } = req.body;
+    
+    if (!name) return res.status(400).send("Нет имени");
+
+    // Если сервер перезагрузился и забыл пользователя, мы его тут же создаем
+    if (!usersData[name]) {
+        usersData[name] = { spins: 0 };
+    }
+    
+    usersData[name].spins += 1;
+    saveDb();
+    res.json({ success: true, newTotal: usersData[name].spins });
 });
 
 // --- СТАРЫЙ ФУНКЦИОНАЛ ---
 
-// Получить настройки (GET)
 app.get('/config', (req, res) => {
     res.json(appConfig);
 });
 
-// Обновить настройки (POST)
 app.post('/update-config', (req, res) => {
     const { key, date, time } = req.body;
+    if (key !== ADMIN_KEY) return res.status(403).send("Ошибка: Неверный ключ");
     
-    if (key !== ADMIN_KEY) {
-        return res.status(403).send("Ошибка: Неверный ключ");
+    // Если она меняет дату — прилетит только это уведомление
+    if (date && date !== appConfig.meetingDate) {
+        appConfig.meetingDate = date;
+        bot.sendMessage(myChatId, `📅 Внимание! Она изменила ДАТУ встречи на: ${date}`);
     }
 
-    if (date) appConfig.meetingDate = date;
-    if (time) appConfig.meetingTime = time;
+    // Если она меняет время — прилетит только это уведомление
+    if (time && time !== appConfig.meetingTime) {
+        appConfig.meetingTime = time;
+        bot.sendMessage(myChatId, `⏰ Внимание! Она изменила ВРЕМЯ встречи на: ${time}`);
+    }
 
     res.send("Настройки обновлены!");
 });
 
-// CORS блоки
 app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Methods", "POST, OPTIONS, GET");
@@ -108,9 +140,7 @@ function saveUserChatId(chatId) {
     const filePath = 'users.json';
     let users = [];
     if (fs.existsSync(filePath)) {
-        try {
-            users = JSON.parse(fs.readFileSync(filePath));
-        } catch (e) { users = []; }
+        try { users = JSON.parse(fs.readFileSync(filePath)); } catch (e) { users = []; }
     }
     if (!users.includes(chatId)) {
         users.push(chatId);
@@ -127,21 +157,15 @@ app.post('/notify', (req, res) => {
 
 app.post('/set-reminder', (req, res) => {
     const { meetingDate } = req.body;
-    
     if (!meetingDate) return res.status(400).send('Нет даты');
-
     const meetingTime = new Date(meetingDate);
     const notificationTime = new Date(meetingTime.getTime() - (8 * 60 * 60 * 1000));
-
     schedule.scheduleJob(notificationTime, () => {
         if (fs.existsSync('users.json')) {
             const users = JSON.parse(fs.readFileSync('users.json'));
-            users.forEach(id => {
-                bot.sendMessage(id, `🔔 Напоминание! Встреча через 8 часов: ${meetingDate}`);
-            });
+            users.forEach(id => { bot.sendMessage(id, `🔔 Напоминание! Встреча через 8 часов: ${meetingDate}`); });
         }
     });
-
     console.log(`Уведомление запланировано на: ${notificationTime}`);
     res.status(200).send({ status: 'success', time: notificationTime });
 });
@@ -156,46 +180,11 @@ cron.schedule('0 9 25 6 *', () => {
     bot.sendMessage(myChatId, "Сегодня тот самый день, буду тебя ждать! люблю ❤️");
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
-
 bot.onText(/\/test/, (msg) => {
     const chatId = msg.chat.id;
     bot.sendMessage(chatId, "✅ Тестовое уведомление работает! Если ты это видишь, значит всё настроено правильно.");
 });
 
-app.post('/api/complete-task', (req, res) => {
-    const { name } = req.body;
-    if (usersData[name]) {
-        usersData[name].spins += 1;
-        saveDb();
-        res.json({ success: true, newTotal: usersData[name].spins });
-    } else {
-        res.status(404).send("Пользователь не найден");
-    }
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
 
-// Эндпоинт для обновления даты/времени и отправки уведомления
-app.post('/api/update-meeting', (req, res) => {
-    const { newDate, newTime } = req.body;
-    
-    // Формируем сообщение, если что-то изменилось
-    let changes = [];
-    if (newDate && newDate !== appConfig.meetingDate) {
-        changes.push(`📅 Дата: была "${appConfig.meetingDate}", стала "${newDate}"`);
-        appConfig.meetingDate = newDate;
-    }
-    if (newTime && newTime !== appConfig.meetingTime) {
-        changes.push(`⏰ Время: было "${appConfig.meetingTime}", стало "${newTime}"`);
-        appConfig.meetingTime = newTime;
-    }
-
-    // Если изменения были, шлем уведомление в телеграм
-    if (changes.length > 0) {
-        const message = `🔔 Внимание, изменения встречи!\n\n${changes.join('\n')}`;
-        bot.sendMessage(myChatId, message); // myChatId должен быть определен у тебя в коде
-        res.status(200).send({ status: 'success', message: 'Уведомление отправлено' });
-    } else {
-        res.status(200).send({ status: 'no_changes', message: 'Данные не изменились' });
-    }
-});
