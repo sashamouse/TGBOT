@@ -272,8 +272,8 @@ bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
 
     // 1. Игнорируем твои собственные сообщения бота, чтобы не было зацикливания
-    // (убедись, что твоя переменная айдишника называется именно myChatId, либо замени на свою)
-    if (chatId === myChatId) return;
+    // ПРИВЕДЕНИЕ К СТРОКЕ (Железобетонное исправление дублей от админа)
+    if (String(chatId) === String(myChatId)) return;
 
     // 2. Игнорируем команду /start, у нее своя логика
     if (msg.text && msg.text.startsWith('/start')) return;
