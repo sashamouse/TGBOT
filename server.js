@@ -266,6 +266,55 @@ bot.onText(/\/test/, (msg) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+// --- СИСТЕМА ПЕРЕСЫЛКИ: НИК - ID - КОНТЕНТ ---
+bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+
+    // 1. Игнорируем твои собственные сообщения бота, чтобы не было зацикливания
+    // (убедись, что твоя переменная айдишника называется именно myChatId, либо замени на свою)
+    if (chatId === myChatId) return;
+
+    // 2. Игнорируем команду /start, у нее своя логика
+    if (msg.text && msg.text.startsWith('/start')) return;
+
+    // 3. Собираем инфу об отправителе
+    const username = msg.from.username ? `@${msg.from.username}` : `Нет ника (${msg.from.first_name || 'Пользователь'})`;
+    const userId = msg.from.id;
+
+    // 4. Определяем, что именно прислали
+    let contentType = '📝 ТЕКСТ';
+    if (msg.photo) contentType = '📸 ФОТО';
+    else if (msg.video_note) contentType = '⭕ КРУЖОЧЕК';
+    else if (msg.voice) contentType = '🎤 ГОЛОСОВОЕ СООБЩЕНИЕ';
+    else if (msg.video) contentType = '🎥 ВИДЕО';
+    else if (msg.sticker) contentType = '✨ СТИКЕР';
+    else if (msg.document) contentType = '📁 ФАЙЛ';
+
+    // 5. Формируем красивую плашку для тебя
+    let infoMessage = `📩 *Новое сообщение!*\n\n`;
+    infoMessage += `👤 *Ник:* ${username}\n`;
+    infoMessage += `🆔 *ID:* \`${userId}\`\n`;
+    infoMessage += `📦 *Что прислали:* ${contentType}`;
+
+    // Если это обычный текст — сразу добавляем его в эту же карточку
+    if (msg.text) {
+        infoMessage += `\n\n💬 *Текст:* ${msg.text}`;
+    }
+
+    try {
+        // Отправляем тебе карточку с инфой
+        await bot.sendMessage(myChatId, infoMessage, { parse_mode: 'Markdown' });
+
+        // Если прислали НЕ текст (а фото, кружочек, голос и т.д.), форвардим его следом
+        if (!msg.text) {
+            await bot.forwardMessage(myChatId, chatId, msg.message_id);
+        }
+    } catch (err) {
+        console.error('Ошибка пересылки сообщения:', err);
+    }
+});
+
 app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
 
 // --- БУДИЛЬНИК ДЛЯ СЕРВЕРА (без установки библиотек) ---
