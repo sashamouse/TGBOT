@@ -188,3 +188,57 @@ bot.onText(/\/test/, (msg) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
 
+// --- АДМИН-КОМАНДЫ ДЛЯ УПРАВЛЕНИЯ ИЗ ТЕЛЕГРАМА ---
+
+// 1. Посмотреть список всех, кто подписался (нажал на кнопку)
+bot.onText(/\/chats/, (msg) => {
+    const chatId = msg.chat.id.toString();
+    if (chatId !== myChatId) return; // Проверка, что пишет именно админ (ты)
+
+    if (fs.existsSync('users.json')) {
+        const users = JSON.parse(fs.readFileSync('users.json'));
+        if (users.length === 0) {
+            bot.sendMessage(myChatId, "👥 Список пользователей пуст.");
+        } else {
+            bot.sendMessage(myChatId, `👥 Список ID пользователей в базе:\n\n${users.join('\n')}\n\nЧтобы отправить сообщение конкретному человеку, скопируй его ID и напиши:\n/send [ID] [Текст]`);
+        }
+    } else {
+        bot.sendMessage(myChatId, "Файл users.json еще не создан (никто не подписался).");
+    }
+});
+
+// 2. Отправить любое сообщение ЛЮБОМУ пользователю по его ID
+bot.onText(/\/send (\d+) (.+)/, (msg, match) => {
+    const chatId = msg.chat.id.toString();
+    if (chatId !== myChatId) return; // Только для тебя
+
+    const targetChatId = match[1]; // ID того, кому шлем
+    const textToSend = match[2];   // Текст сообщения
+
+    bot.sendMessage(targetChatId, textToSend)
+        .then(() => {
+            bot.sendMessage(myChatId, `✅ Сообщение успешно отправлено на ID ${targetChatId}`);
+        })
+        .catch((err) => {
+            bot.sendMessage(myChatId, `❌ Ошибка отправки: ${err.message}`);
+        });
+});
+
+// 3. Отправить сообщение СРАЗУ ВСЕМ (если там будешь ты, она и кто-то еще)
+bot.onText(/\/broadcast (.+)/, (msg, match) => {
+    const chatId = msg.chat.id.toString();
+    if (chatId !== myChatId) return; // Только для тебя
+
+    const textToSend = match[1];
+
+    if (fs.existsSync('users.json')) {
+        const users = JSON.parse(fs.readFileSync('users.json'));
+        users.forEach(id => {
+            bot.sendMessage(id, textToSend)
+                .catch((err) => console.log(`Ошибка отправки для ${id}:`, err.message));
+        });
+        bot.sendMessage(myChatId, `📢 Рассылка улетела всем пользователям!`);
+    } else {
+        bot.sendMessage(myChatId, "База пуста, слать некому.");
+    }
+});
