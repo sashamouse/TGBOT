@@ -243,10 +243,12 @@ bot.onText(/\/broadcast (.+)/, (msg, match) => {
     }
 });
 
-// --- БУДИЛЬНИК ДЛЯ СЕРВЕРА (чтобы не засыпал) ---
-const axios = require('axios');
+// --- БУДИЛЬНИК ДЛЯ СЕРВЕРА (без установки библиотек) ---
+const https = require('https');
 setInterval(() => {
-    axios.get('https://tgbot-5mm5.onrender.com')
-        .then(() => console.log('Сервер пнул сам себя'))
-        .catch(() => {});
+    https.get('https://tgbot-5mm5.onrender.com', (res) => {
+        console.log('Сервер пнул сам себя');
+    }).on('error', (e) => {
+        // Ошибки нам не важны, просто игнорируем
+    });
 }, 600000); // 600 000 мс = 10 минут
